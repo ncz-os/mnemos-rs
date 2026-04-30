@@ -52,6 +52,10 @@ enum Cmd {
         /// Max results
         #[arg(short = 'n', long, default_value_t = 10)]
         limit: u32,
+
+        /// Print raw JSON response
+        #[arg(long)]
+        raw: bool,
     },
 
     /// Create a memory on the connected mnemos
@@ -120,8 +124,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Status { raw } => commands::status(&cli.base, cli.token.as_deref(), raw).await,
-        Cmd::Search { query, limit } => {
-            commands::search(&cli.base, cli.token.as_deref(), &query, limit).await
+        Cmd::Search { query, limit, raw } => {
+            commands::search(&cli.base, cli.token.as_deref(), &query, limit, raw).await
         }
         Cmd::Create { content, category } => {
             commands::create(&cli.base, cli.token.as_deref(), &content, &category).await

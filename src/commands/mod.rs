@@ -2,13 +2,11 @@ use anyhow::Result;
 
 use crate::{PeerAction, SyncDirection};
 
+mod search;
 mod status;
 
+pub use search::search;
 pub use status::status;
-
-pub async fn search(_base: &str, _token: Option<&str>, _query: &str, _limit: u32) -> Result<()> {
-    anyhow::bail!("search: not implemented in slice 1 (scaffold only)")
-}
 
 pub async fn create(
     _base: &str,
