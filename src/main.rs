@@ -11,7 +11,8 @@
 //! full charter and Python/Rust scope decision.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 mod commands;
 
@@ -27,7 +28,14 @@ struct Cli {
     )]
     base: String,
 
-    /// Bearer token for auth (default: read from MNEMOS_API_KEY env)
+    /// Bearer token for auth (default: read from MNEMOS_API_KEY env).
+    /// global = true so authenticated subcommands accept --token in
+    /// either position (`mnemosctl --token X status` AND `mnemosctl
+    /// status --token X`). Misuse with `peer add ... --token X` is
+    /// caught at runtime via ArgMatches::value_source() — a CLI-sourced
+    /// token paired with Cmd::Peer is rejected, while env-sourced
+    /// tokens (MNEMOS_API_KEY) remain harmless because peer dispatch
+    /// never forwards cli.token.
     #[arg(long, env = "MNEMOS_API_KEY", global = true, hide_env_values = true)]
     token: Option<String>,
 
@@ -123,9 +131,29 @@ enum PeerAction {
         #[arg(long)]
         name: Option<String>,
 
-        /// Bearer token for the peer
-        #[arg(long, hide_env_values = true)]
-        token: Option<String>,
+        /// Bearer token for the peer. Distinct flag name from the
+        /// global --token so the server bearer (sourced from
+        /// MNEMOS_API_KEY) does not silently leak into peer records.
+        #[arg(long = "peer-token", hide_env_values = true)]
+        peer_token: Option<String>,
+
+        /// Drop the previously-saved token. Required when re-adding a
+        /// peer to make it anonymous; without this flag, omitting
+        /// --peer-token preserves the existing token.
+        #[arg(long = "clear-token", conflicts_with = "peer_token")]
+        clear_token: bool,
+
+        /// Carry the existing bearer across a URL change. Required
+        /// when changing a peer's URL without supplying a new token,
+        /// because silently re-binding a bearer to a different host
+        /// would leak credentials across trust boundaries. Same-URL
+        /// retries do NOT need this flag.
+        #[arg(
+            long = "preserve-token",
+            conflicts_with = "peer_token",
+            conflicts_with = "clear_token"
+        )]
+        preserve_token: bool,
     },
     /// List configured peers
     List,
@@ -133,7 +161,26 @@ enum PeerAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    // Parse via matches+from_arg_matches so we can introspect WHICH
+    // source populated `--token`. Default-from-env is fine for most
+    // commands; CLI-supplied --token paired with `peer add` is a
+    // silent footgun (server bearer would be persisted as the peer's
+    // token if forwarded blindly, or dropped if not). Reject explicitly.
+    let matches = Cli::command().get_matches();
+    let token_from_cli = matches.value_source("token") == Some(ValueSource::CommandLine);
+    let cli = Cli::from_arg_matches(&matches).map_err(|e| {
+        e.exit();
+    });
+    let cli = cli.unwrap_or_else(|_| unreachable!("from_arg_matches exits on error"));
+
+    if token_from_cli && matches!(cli.cmd, Cmd::Peer { .. }) {
+        eprintln!(
+            "error: --token is for server auth, not peer credentials. \
+             Use `peer add ... --peer-token TOK` to attach a token to a peer."
+        );
+        std::process::exit(2);
+    }
+
     match cli.cmd {
         Cmd::Status { raw } => commands::status(&cli.base, cli.token.as_deref(), raw).await,
         Cmd::Search { query, limit, raw } => {
