@@ -2,20 +2,13 @@ use anyhow::Result;
 
 use crate::{PeerAction, SyncDirection};
 
+mod create;
 mod search;
 mod status;
 
+pub use create::create;
 pub use search::search;
 pub use status::status;
-
-pub async fn create(
-    _base: &str,
-    _token: Option<&str>,
-    _content: &str,
-    _category: &str,
-) -> Result<()> {
-    anyhow::bail!("create: not implemented in slice 1 (scaffold only)")
-}
 
 pub async fn sync(_base: &str, _token: Option<&str>, _dir: SyncDirection) -> Result<()> {
     anyhow::bail!("sync: not implemented in slice 1 (scaffold only)")

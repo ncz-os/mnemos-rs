@@ -108,8 +108,11 @@ fn print_summary(response: &Value, query: &str) {
     for memory in memories {
         let id = text_field(memory, &["id", "memory_id", "uuid"]).unwrap_or("unknown");
         let category = text_field(memory, &["category", "type"]).unwrap_or("unknown");
-        let created_at = text_field(memory, &["created_at", "timestamp", "created", "updated_at"])
-            .unwrap_or("");
+        let created_at = text_field(
+            memory,
+            &["created_at", "timestamp", "created", "updated_at"],
+        )
+        .unwrap_or("");
         let content = text_field(memory, &["content", "text", "summary"]).unwrap_or("");
 
         println!(

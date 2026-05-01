@@ -60,13 +60,25 @@ enum Cmd {
 
     /// Create a memory on the connected mnemos
     Create {
-        /// Memory content
+        /// Memory content (omit to read from stdin)
         #[arg(long)]
-        content: String,
+        content: Option<String>,
 
         /// Category (facts, solutions, architecture, ...)
         #[arg(long, default_value = "facts")]
         category: String,
+
+        /// Subcategory for scoped retrieval
+        #[arg(long)]
+        subcategory: Option<String>,
+
+        /// Octal-style Unix permission digits (0-777). 644 = federation-visible.
+        #[arg(long)]
+        permission_mode: Option<u16>,
+
+        /// Print raw JSON response from the server
+        #[arg(long)]
+        raw: bool,
     },
 
     /// Sync memories with a peer
@@ -127,8 +139,23 @@ async fn main() -> Result<()> {
         Cmd::Search { query, limit, raw } => {
             commands::search(&cli.base, cli.token.as_deref(), &query, limit, raw).await
         }
-        Cmd::Create { content, category } => {
-            commands::create(&cli.base, cli.token.as_deref(), &content, &category).await
+        Cmd::Create {
+            content,
+            category,
+            subcategory,
+            permission_mode,
+            raw,
+        } => {
+            commands::create(
+                &cli.base,
+                cli.token.as_deref(),
+                content.as_deref(),
+                &category,
+                subcategory.as_deref(),
+                permission_mode,
+                raw,
+            )
+            .await
         }
         Cmd::Sync { direction } => commands::sync(&cli.base, cli.token.as_deref(), direction).await,
         Cmd::Peer { action } => commands::peer(action).await,
