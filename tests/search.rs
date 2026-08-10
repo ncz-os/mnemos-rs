@@ -88,6 +88,52 @@ fn empty_results_prints_no_match() {
 }
 
 #[test]
+fn malformed_success_response_returns_an_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/memories/search");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "error": "upstream unavailable"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "search", "kubernetes"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
+    assert!(stderr.contains("invalid search response"));
+}
+
+#[test]
+fn non_ascii_timestamp_does_not_panic() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/memories/search");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "memories": [{
+                "id": "memory-1",
+                "category": "facts",
+                "created_at": "123456789012345é",
+                "content": "content"
+            }],
+            "count": 1
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "search", "unicode"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
+    assert!(stdout.contains("123456789012345é"));
+}
+
+#[test]
 fn _401_prints_auth_error_exit_3() {
     let server = MockServer::start();
     server.mock(|when, then| {

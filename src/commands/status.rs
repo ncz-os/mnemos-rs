@@ -21,7 +21,7 @@ pub async fn status(base: &str, token: Option<&str>, raw: bool) -> Result<()> {
 
     let stats = get_json(&client, &format!("{base}/stats"), token)
         .await
-        .ok();
+        .context("failed to fetch MNEMOS stats")?;
 
     if raw {
         println!(
@@ -32,7 +32,7 @@ pub async fn status(base: &str, token: Option<&str>, raw: bool) -> Result<()> {
             }))?
         );
     } else {
-        print_summary(&health, stats.as_ref());
+        print_summary(&health, &stats);
     }
 
     Ok(())
@@ -56,7 +56,7 @@ async fn get_json(client: &Client, url: &str, token: Option<&str>) -> Result<Val
         .context("invalid JSON response")
 }
 
-fn print_summary(health: &Value, stats: Option<&Value>) {
+fn print_summary(health: &Value, stats: &Value) {
     let name = text_field(health, &["name", "node", "peer", "hostname"])
         .or_else(|| {
             let status = text_field(health, &["status"])?;
@@ -65,7 +65,7 @@ fn print_summary(health: &Value, stats: Option<&Value>) {
         .unwrap_or("server");
     let version = text_field(health, &["version"]).unwrap_or("unknown");
     let profile = text_field(health, &["profile"]).unwrap_or("unknown");
-    let db = match bool_field(health, &["db_connected"]) {
+    let db = match bool_field(health, &["database_connected"]) {
         Some(true) => "connected",
         Some(false) => "disconnected",
         None => "unknown",
@@ -75,15 +75,11 @@ fn print_summary(health: &Value, stats: Option<&Value>) {
     println!("MNEMOS {name} (v{version}, {profile} profile)");
     println!("  DB:        {db}");
 
-    if let Some(stats) = stats {
-        if let Some(nats) = nats_summary(stats) {
-            println!("  NATS:      {nats}");
-        }
-        println!("  Memories:  {}", memories_summary(stats));
-        println!("  Compressions: {}", compressions_summary(stats));
-    } else {
-        println!("  Memories:  unavailable");
+    if let Some(nats) = nats_summary(health, stats) {
+        println!("  NATS:      {nats}");
     }
+    println!("  Memories:  {}", memories_summary(stats));
+    println!("  Compressions: {}", compressions_summary(stats));
 
     println!("  Health:    {}", health_status.to_ascii_uppercase());
 }
@@ -98,14 +94,13 @@ fn memories_summary(stats: &Value) -> String {
 
 fn compressions_summary(stats: &Value) -> String {
     let done = number_field(stats, &["total_compressions", "compressions_done"]).unwrap_or(0);
-    let pending =
-        number_field(stats, &["pending_compressions", "compressions_pending"]).unwrap_or(0);
+    let unreviewed = number_field(stats, &["unreviewed_compressions"]).unwrap_or(0);
 
-    format!("{done} done, {pending} pending")
+    format!("{done} done, {unreviewed} unreviewed")
 }
 
-fn nats_summary(stats: &Value) -> Option<String> {
-    let enabled = bool_field(stats, &["nats_enabled"])?;
+fn nats_summary(health: &Value, stats: &Value) -> Option<String> {
+    let enabled = bool_field(health, &["nats_publishing_enabled"])?;
     let status = if enabled { "enabled" } else { "disabled" };
 
     match number_field(stats, &["nats_streams", "streams"]) {

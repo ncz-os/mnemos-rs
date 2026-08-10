@@ -2,7 +2,20 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use reqwest::{Client, StatusCode};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+
+type MemoryItem = Value;
+
+#[derive(Deserialize, Serialize)]
+struct MemoryListResponse {
+    count: u64,
+    memories: Vec<MemoryItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency_ms: Option<u64>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
 
 pub async fn search(
     base: &str,
@@ -53,7 +66,7 @@ async fn post_search(
     token: Option<&str>,
     query: &str,
     limit: u32,
-) -> Result<Value, SearchError> {
+) -> Result<MemoryListResponse, SearchError> {
     let mut request = client.post(url).json(&json!({
         "query": query,
         "limit": limit,
@@ -75,30 +88,23 @@ async fn post_search(
     }
 
     response
-        .json::<Value>()
+        .json::<MemoryListResponse>()
         .await
-        .context("invalid JSON response")
+        .context("invalid search response")
         .map_err(SearchError::Other)
 }
 
-fn print_summary(response: &Value, query: &str) {
-    let memories = response
-        .get("memories")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
+fn print_summary(response: &MemoryListResponse, query: &str) {
+    let memories = response.memories.as_slice();
 
     if memories.is_empty() {
         println!("No memories match \"{query}\".");
         return;
     }
 
-    let count = response
-        .get("count")
-        .and_then(Value::as_u64)
-        .unwrap_or(memories.len() as u64);
+    let count = response.count;
 
-    match response.get("latency_ms").and_then(Value::as_u64) {
+    match response.latency_ms {
         Some(latency_ms) => {
             println!("{count} memories matching \"{query}\" (took {latency_ms}ms):")
         }
@@ -140,12 +146,14 @@ fn truncate(value: &str, max_chars: usize) -> String {
 }
 
 fn format_timestamp(value: &str) -> String {
-    if value.len() >= 16 {
-        let prefix = &value[..16];
-        if prefix.as_bytes().get(10) == Some(&b'T') {
-            return format!("{} {}", &prefix[..10], &prefix[11..16]);
+    let prefix: Vec<char> = value.chars().take(16).collect();
+    if prefix.len() == 16 {
+        if prefix[10] == 'T' {
+            let date: String = prefix[..10].iter().collect();
+            let time: String = prefix[11..16].iter().collect();
+            return format!("{date} {time}");
         }
-        return prefix.to_string();
+        return prefix.iter().collect();
     }
 
     value.to_string()

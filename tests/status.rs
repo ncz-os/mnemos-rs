@@ -17,7 +17,8 @@ fn happy_path_prints_friendly_summary() {
             "status": "ok",
             "version": "4.2.0a1",
             "profile": "server",
-            "db_connected": true
+            "database_connected": true,
+            "nats_publishing_enabled": true
         }));
     });
     server.mock(|when, then| {
@@ -29,8 +30,7 @@ fn happy_path_prints_friendly_summary() {
             "native_memories": 8888,
             "federated_memories": 0,
             "total_compressions": 489,
-            "pending_compressions": 0,
-            "nats_enabled": true,
+            "unreviewed_compressions": 12,
             "nats_streams": 3
         }));
     });
@@ -49,7 +49,10 @@ fn happy_path_prints_friendly_summary() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
     assert!(stdout.contains("MNEMOS pythia (v4.2.0a1, server profile)"));
+    assert!(stdout.contains("DB:        connected"));
+    assert!(stdout.contains("NATS:      enabled (3 streams)"));
     assert!(stdout.contains("Memories:  8888 total (8888 native, 0 federated)"));
+    assert!(stdout.contains("Compressions: 489 done, 12 unreviewed"));
 }
 
 #[test]
@@ -69,7 +72,7 @@ fn health_unreachable_exits_2_with_stderr_message() {
 }
 
 #[test]
-fn stats_401_prints_unavailable_but_succeeds() {
+fn stats_401_returns_an_error() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(GET).path("/health");
@@ -78,7 +81,7 @@ fn stats_401_prints_unavailable_but_succeeds() {
             "status": "ok",
             "version": "4.2.0a1",
             "profile": "server",
-            "db_connected": true
+            "database_connected": true
         }));
     });
     server.mock(|when, then| {
@@ -91,9 +94,10 @@ fn stats_401_prints_unavailable_but_succeeds() {
         .output()
         .expect("mnemosctl runs");
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
-    assert!(stdout.contains("Memories:  unavailable"));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
+    assert!(stderr.contains("failed to fetch MNEMOS stats"));
+    assert!(stderr.contains("HTTP 401 Unauthorized"));
 }
 
 #[test]
@@ -105,7 +109,7 @@ fn raw_prints_health_stats_union_shape() {
             "status": "ok",
             "version": "4.2.0a1",
             "profile": "server",
-            "db_connected": true
+            "database_connected": true
         }));
     });
     server.mock(|when, then| {
