@@ -2,7 +2,6 @@ use anyhow::Result;
 
 #[cfg(not(unix))]
 use crate::PeerAction;
-use crate::SyncDirection;
 
 mod create;
 #[cfg(unix)]
@@ -30,12 +29,4 @@ pub async fn peer(_action: PeerAction) -> Result<()> {
         "peer add/list requires Unix file primitives (mode 0600, flock, symlink_metadata). \
          Native Windows is not a supported target — use the Linux build under WSL2 instead."
     )
-}
-
-pub async fn sync(_base: &str, _token: Option<&str>, _dir: SyncDirection) -> Result<()> {
-    anyhow::bail!("sync: not implemented in slice 1 (scaffold only)")
-}
-
-pub async fn mcp_stdio(_base: &str, _token: Option<&str>) -> Result<()> {
-    anyhow::bail!("mcp-stdio: not implemented in slice 1 (scaffold only)")
 }

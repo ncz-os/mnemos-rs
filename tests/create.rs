@@ -25,6 +25,7 @@ fn happy_path_explicit_permission_mode_prints_summary() {
             "category": "facts",
             "permission_mode": 644,
             "content": "v4.2.0a2 ships",
+            "created": "2026-08-10T12:00:00",
         }));
     });
 
@@ -71,6 +72,7 @@ fn omits_permission_mode_field_when_unset() {
             "id": "mem_177abcdef0042",
             "category": "facts",
             "content": "no mode flag",
+            "created": "2026-08-10T12:00:00",
         }));
     });
 
@@ -110,6 +112,8 @@ fn reads_content_from_stdin_when_flag_absent() {
         then.status(201).json_body_obj(&serde_json::json!({
             "id": "mem_177abcdef0099",
             "category": "facts",
+            "content": "piped content",
+            "created": "2026-08-10T12:00:00",
         }));
     });
 
@@ -246,6 +250,7 @@ fn raw_dumps_full_json_response() {
             "category": "facts",
             "permission_mode": 600,
             "content": "raw dump",
+            "created": "2026-08-10T12:00:00",
             "metadata": {},
         }));
     });
@@ -288,6 +293,8 @@ fn passes_subcategory_through() {
         then.status(201).json_body_obj(&serde_json::json!({
             "id": "mem_177abcdef0123",
             "category": "facts",
+            "content": "scoped",
+            "created": "2026-08-10T12:00:00",
         }));
     });
 
@@ -309,4 +316,34 @@ fn passes_subcategory_through() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn malformed_success_response_is_a_protocol_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/v1/memories");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "error": "upstream unavailable"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args([
+            "--base",
+            &server.base_url(),
+            "create",
+            "--content",
+            "not created",
+        ])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .expect("stdout is utf8")
+        .is_empty());
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr is utf8")
+        .contains("invalid create response"));
 }

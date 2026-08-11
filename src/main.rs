@@ -1,11 +1,6 @@
 //! mnemosctl — MNEMOS desktop CLI
 //!
-//! Replaces three Python desktop helpers in `~/mnemos-desktop/`:
-//!   - `sync_from_pythia.py` -> `mnemosctl sync pull --peer pythia`
-//!   - `sync_to_pythia.py`   -> `mnemosctl sync push --peer pythia`
-//!   - `create_local.py`     -> `mnemosctl create --category facts ...`
-//!
-//! Plus net-new helpers: status / search / peer / mcp-stdio.
+//! Provides status, search, memory creation, and peer configuration helpers.
 //!
 //! See `project_mnemos_rust_clients.md` in MNEMOS auto-memory for the
 //! full charter and Python/Rust scope decision.
@@ -89,34 +84,10 @@ enum Cmd {
         raw: bool,
     },
 
-    /// Sync memories with a peer
-    Sync {
-        #[command(subcommand)]
-        direction: SyncDirection,
-    },
-
     /// Manage peer connections
     Peer {
         #[command(subcommand)]
         action: PeerAction,
-    },
-
-    /// Run the MCP stdio bridge (spawned by Claude Code per session)
-    McpStdio,
-}
-
-#[derive(Subcommand, Debug)]
-enum SyncDirection {
-    /// Pull memories from peer into local
-    Pull {
-        /// Peer name (configured via `mnemosctl peer add`)
-        #[arg(long)]
-        peer: String,
-    },
-    /// Push local memories to peer
-    Push {
-        #[arg(long)]
-        peer: String,
     },
 }
 
@@ -204,8 +175,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Cmd::Sync { direction } => commands::sync(&cli.base, cli.token.as_deref(), direction).await,
         Cmd::Peer { action } => commands::peer(action).await,
-        Cmd::McpStdio => commands::mcp_stdio(&cli.base, cli.token.as_deref()).await,
     }
 }

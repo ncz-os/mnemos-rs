@@ -15,6 +15,7 @@ fn happy_path_prints_friendly_summary() {
         then.status(200).json_body_obj(&serde_json::json!({
             "name": "pythia",
             "status": "ok",
+            "timestamp": "2026-08-10T12:00:00",
             "version": "4.2.0a1",
             "profile": "server",
             "database_connected": true,
@@ -30,7 +31,11 @@ fn happy_path_prints_friendly_summary() {
             "native_memories": 8888,
             "federated_memories": 0,
             "total_compressions": 489,
+            "average_compression_ratio": 0.57,
+            "average_quality_rating": 75,
+            "memories_by_category": {"facts": 8888},
             "unreviewed_compressions": 12,
+            "timestamp": "2026-08-10T12:00:00",
             "nats_streams": 3
         }));
     });
@@ -79,6 +84,7 @@ fn stats_401_returns_an_error() {
         then.status(200).json_body_obj(&serde_json::json!({
             "name": "pythia",
             "status": "ok",
+            "timestamp": "2026-08-10T12:00:00",
             "version": "4.2.0a1",
             "profile": "server",
             "database_connected": true
@@ -107,6 +113,7 @@ fn raw_prints_health_stats_union_shape() {
         when.method(GET).path("/health");
         then.status(200).json_body_obj(&serde_json::json!({
             "status": "ok",
+            "timestamp": "2026-08-10T12:00:00",
             "version": "4.2.0a1",
             "profile": "server",
             "database_connected": true
@@ -118,7 +125,12 @@ fn raw_prints_health_stats_union_shape() {
             "total_memories": 42,
             "native_memories": 40,
             "federated_memories": 2,
-            "total_compressions": 7
+            "total_compressions": 7,
+            "average_compression_ratio": 0.57,
+            "average_quality_rating": 75,
+            "memories_by_category": {"facts": 42},
+            "unreviewed_compressions": 0,
+            "timestamp": "2026-08-10T12:00:00"
         }));
     });
 
@@ -131,4 +143,141 @@ fn raw_prints_health_stats_union_shape() {
     let stdout: Value = serde_json::from_slice(&output.stdout).expect("stdout is JSON");
     assert_eq!(stdout["health"]["version"], "4.2.0a1");
     assert_eq!(stdout["stats"]["total_memories"], 42);
+}
+
+#[test]
+fn distillation_worker_error_is_displayed_as_degraded_and_exits_nonzero() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/health");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "status": "healthy",
+            "timestamp": "2026-08-10T12:00:00",
+            "database_connected": true,
+            "version": "6.2.0",
+            "profile": "server",
+            "distillation_worker": "error"
+        }));
+    });
+    server.mock(|when, then| {
+        when.method(GET).path("/stats");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "total_memories": 1,
+            "native_memories": 1,
+            "federated_memories": 0,
+            "total_compressions": 0,
+            "average_compression_ratio": 0.57,
+            "average_quality_rating": 75,
+            "memories_by_category": {"facts": 1},
+            "unreviewed_compressions": 0,
+            "timestamp": "2026-08-10T12:00:00"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "status"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
+    assert!(stdout.contains("Distillation worker: error"));
+    assert!(stdout.contains("Health:    DEGRADED"));
+}
+
+#[test]
+fn disabled_distillation_worker_is_healthy_for_edge_profile() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/health");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "status": "healthy",
+            "timestamp": "2026-08-10T12:00:00",
+            "database_connected": true,
+            "version": "6.2.0",
+            "profile": "edge",
+            "distillation_worker": "disabled"
+        }));
+    });
+    server.mock(|when, then| {
+        when.method(GET).path("/stats");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "total_memories": 0,
+            "total_compressions": 0,
+            "average_compression_ratio": 0.57,
+            "average_quality_rating": 75,
+            "memories_by_category": {},
+            "unreviewed_compressions": 0,
+            "timestamp": "2026-08-10T12:00:00"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "status"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
+    assert!(stdout.contains("Distillation worker: disabled"));
+    assert!(stdout.contains("Health:    HEALTHY"));
+}
+
+#[test]
+fn malformed_health_2xx_is_a_protocol_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/health");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "error": "upstream unavailable"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "status"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8(output.stdout)
+        .expect("stdout is utf8")
+        .is_empty());
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr is utf8")
+        .contains("invalid JSON response"));
+}
+
+#[test]
+fn malformed_stats_2xx_is_a_protocol_error() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/health");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "status": "healthy",
+            "timestamp": "2026-08-10T12:00:00",
+            "database_connected": true,
+            "version": "6.2.0",
+            "profile": "edge",
+            "distillation_worker": "disabled"
+        }));
+    });
+    server.mock(|when, then| {
+        when.method(GET).path("/stats");
+        then.status(200).json_body_obj(&serde_json::json!({
+            "error": "upstream unavailable"
+        }));
+    });
+
+    let output = mnemosctl()
+        .args(["--base", &server.base_url(), "status"])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .expect("stdout is utf8")
+        .is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf8");
+    assert!(stderr.contains("failed to fetch MNEMOS stats"));
+    assert!(stderr.contains("invalid JSON response"));
 }

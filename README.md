@@ -10,8 +10,7 @@ where Rust pays off:
 
 | Component | Old (Python) | New (Rust) |
 |---|---|---|
-| Desktop CLI | 3 ad-hoc Python scripts in `~/mnemos-desktop/` | One `mnemosctl` binary, ~10 MB, statically linked |
-| MCP stdio | SSH→PYTHIA→`/opt/mnemos/venv/bin/python /opt/mnemos/mcp_server.py` | One `mnemosctl mcp-stdio` invocation, instant startup, zero install dependencies |
+| Desktop utilities | Ad-hoc Python scripts in `~/mnemos-desktop/` | One `mnemosctl` binary, ~10 MB, statically linked |
 
 See [the charter memory] for the Python/Rust scope decision rule:
 **per-user / per-session / per-spawn → Rust; per-host / per-server /
@@ -21,8 +20,7 @@ per-cutover → Python.**
 
 ## Binaries
 
-- `mnemosctl` — desktop CLI. Status, search, create, sync, peer mgmt,
-  MCP stdio bridge.
+- `mnemosctl` — desktop CLI. Status, search, create, and peer management.
 
 ## Build matrix
 
@@ -34,8 +32,7 @@ per-cutover → Python.**
 
 ## Status
 
-Slice 1 (scaffold): clap CLI surface + subcommand stubs.
-Subsequent slices fill in subcommands one at a time.
+Implemented commands are exposed in `mnemosctl --help`.
 
 ## License
 

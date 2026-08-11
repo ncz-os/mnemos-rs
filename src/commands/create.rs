@@ -3,7 +3,20 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+
+#[derive(Deserialize, Serialize)]
+struct MemoryResponse {
+    id: String,
+    content: String,
+    category: String,
+    created: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    permission_mode: Option<u64>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
 
 pub async fn create(
     base: &str,
@@ -84,7 +97,7 @@ async fn post_create(
     category: &str,
     subcategory: Option<&str>,
     permission_mode: Option<u16>,
-) -> Result<Value, CreateError> {
+) -> Result<MemoryResponse, CreateError> {
     let mut body = Map::new();
     body.insert("content".into(), json!(content));
     body.insert("category".into(), json!(category));
@@ -126,31 +139,25 @@ async fn post_create(
     }
 
     response
-        .json::<Value>()
+        .json::<MemoryResponse>()
         .await
-        .context("invalid JSON response")
+        .context("invalid create response")
         .map_err(CreateError::Other)
 }
 
-fn print_summary(response: &Value) {
-    let id = response
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let category = response
-        .get("category")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
+fn print_summary(response: &MemoryResponse) {
     // permission_mode is stored as octal-style decimal digits (e.g. the
     // integer 644 means "rw-r--r--"). Render the value as-is rather than
     // converting bases — the server validator gates each digit to 0-7,
     // so the printed integer already reads as a Unix mode.
     let mode = response
-        .get("permission_mode")
-        .and_then(Value::as_u64)
+        .permission_mode
         .map(|n| n.to_string())
         .unwrap_or_else(|| "?".to_string());
-    println!("Created {id} ({category}, mode={mode})");
+    println!(
+        "Created {} ({}, mode={mode})",
+        response.id, response.category
+    );
 }
 
 fn http_status_error(status: StatusCode, detail: &str) -> String {
