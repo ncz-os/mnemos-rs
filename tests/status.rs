@@ -186,6 +186,51 @@ fn distillation_worker_error_is_displayed_as_degraded_and_exits_nonzero() {
 }
 
 #[test]
+fn distillation_worker_starting_is_displayed_as_degraded_and_exits_nonzero() {
+    // `starting` is unhealthy whenever it appears. Server and dev enable
+    // distillation in their manifests; edge can enable it through legacy
+    // defaults, a component selection, or an explicit service override.
+    for profile in ["server", "dev", "edge"] {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/health");
+            then.status(200).json_body_obj(&serde_json::json!({
+                "status": "healthy",
+                "timestamp": "2026-08-10T12:00:00",
+                "database_connected": true,
+                "version": "6.2.0",
+                "profile": profile,
+                "distillation_worker": "starting"
+            }));
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/stats");
+            then.status(200).json_body_obj(&serde_json::json!({
+                "total_memories": 1,
+                "native_memories": 1,
+                "federated_memories": 0,
+                "total_compressions": 0,
+                "average_compression_ratio": 0.57,
+                "average_quality_rating": 75,
+                "memories_by_category": {"facts": 1},
+                "unreviewed_compressions": 0,
+                "timestamp": "2026-08-10T12:00:00"
+            }));
+        });
+
+        let output = mnemosctl()
+            .args(["--base", &server.base_url(), "status"])
+            .output()
+            .expect("mnemosctl runs");
+
+        assert!(!output.status.success(), "profile={profile}");
+        let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
+        assert!(stdout.contains("Distillation worker: starting"));
+        assert!(stdout.contains("Health:    DEGRADED"));
+    }
+}
+
+#[test]
 fn disabled_distillation_worker_is_healthy_for_edge_profile() {
     let server = MockServer::start();
     server.mock(|when, then| {

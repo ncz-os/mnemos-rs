@@ -163,7 +163,7 @@ fn nats_summary(health: &HealthResponse, stats: &StatsResponse) -> Option<String
 fn required_worker_unhealthy(health: &HealthResponse) -> bool {
     matches!(
         health.distillation_worker.as_deref(),
-        Some("error" | "unavailable")
+        Some("starting" | "error" | "unavailable")
     )
 }
 

@@ -6,7 +6,6 @@
 //! full charter and Python/Rust scope decision.
 
 use anyhow::Result;
-use clap::parser::ValueSource;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 mod commands;
@@ -23,14 +22,7 @@ struct Cli {
     )]
     base: String,
 
-    /// Bearer token for auth (default: read from MNEMOS_API_KEY env).
-    /// global = true so authenticated subcommands accept --token in
-    /// either position (`mnemosctl --token X status` AND `mnemosctl
-    /// status --token X`). Misuse with `peer add ... --token X` is
-    /// caught at runtime via ArgMatches::value_source() — a CLI-sourced
-    /// token paired with Cmd::Peer is rejected, while env-sourced
-    /// tokens (MNEMOS_API_KEY) remain harmless because peer dispatch
-    /// never forwards cli.token.
+    /// Bearer token for server auth (default: read from MNEMOS_API_KEY env).
     #[arg(long, env = "MNEMOS_API_KEY", global = true, hide_env_values = true)]
     token: Option<String>,
 
@@ -132,25 +124,11 @@ enum PeerAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Parse via matches+from_arg_matches so we can introspect WHICH
-    // source populated `--token`. Default-from-env is fine for most
-    // commands; CLI-supplied --token paired with `peer add` is a
-    // silent footgun (server bearer would be persisted as the peer's
-    // token if forwarded blindly, or dropped if not). Reject explicitly.
     let matches = Cli::command().get_matches();
-    let token_from_cli = matches.value_source("token") == Some(ValueSource::CommandLine);
     let cli = Cli::from_arg_matches(&matches).map_err(|e| {
         e.exit();
     });
     let cli = cli.unwrap_or_else(|_| unreachable!("from_arg_matches exits on error"));
-
-    if token_from_cli && matches!(cli.cmd, Cmd::Peer { .. }) {
-        eprintln!(
-            "error: --token is for server auth, not peer credentials. \
-             Use `peer add ... --peer-token TOK` to attach a token to a peer."
-        );
-        std::process::exit(2);
-    }
 
     match cli.cmd {
         Cmd::Status { raw } => commands::status(&cli.base, cli.token.as_deref(), raw).await,
@@ -175,6 +153,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Cmd::Peer { action } => commands::peer(action).await,
+        Cmd::Peer { action } => commands::peer(&cli.base, cli.token.as_deref(), action).await,
     }
 }
