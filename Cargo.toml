@@ -1,5 +1,5 @@
 [package]
-name = "mnemosctl"
+name = "mnemos-desktop"
 version = "0.1.0"
 edition = "2021"
 authors = ["Jason Perlow <jperlow@gmail.com>"]
@@ -9,7 +9,7 @@ repository = "https://github.com/mnemos-os/mnemos-rs"
 readme = "README.md"
 
 [[bin]]
-name = "mnemosctl"
+name = "mnemos-desktop"
 path = "src/main.rs"
 
 [dependencies]

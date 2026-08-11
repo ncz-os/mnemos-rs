@@ -10,7 +10,7 @@ where Rust pays off:
 
 | Component | Old (Python) | New (Rust) |
 |---|---|---|
-| Desktop utilities | Ad-hoc Python scripts in `~/mnemos-desktop/` | One `mnemosctl` binary, ~10 MB, statically linked |
+| Desktop utilities | Ad-hoc Python scripts in `~/mnemos-desktop/` | One `mnemos-desktop` binary, ~10 MB, statically linked |
 
 See [the charter memory] for the Python/Rust scope decision rule:
 **per-user / per-session / per-spawn → Rust; per-host / per-server /
@@ -20,7 +20,10 @@ per-cutover → Python.**
 
 ## Binaries
 
-- `mnemosctl` — desktop CLI. Status, search, create, and peer management.
+- `mnemos-desktop` — desktop CLI. Status, search, create, and peer management.
+
+The separately maintained [`mnemosctl`](https://github.com/mnemos-os/mnemosctl)
+project owns the `mnemosctl` package and executable names.
 
 ## Build matrix
 
@@ -32,7 +35,7 @@ per-cutover → Python.**
 
 ## Status
 
-Implemented commands are exposed in `mnemosctl --help`.
+Implemented commands are exposed in `mnemos-desktop --help`.
 
 ## License
 

@@ -3,7 +3,7 @@ use std::process::Command;
 use httpmock::prelude::*;
 
 fn mnemosctl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mnemosctl"))
+    Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
 }
 
 fn peer_json(id: &str, name: &str, base_url: &str, enabled: bool) -> serde_json::Value {
@@ -116,6 +116,48 @@ fn add_without_peer_token_registers_anonymous_peer() {
         String::from_utf8_lossy(&output.stderr)
     );
     create.assert();
+}
+
+#[test]
+fn default_names_keep_ip_peers_distinct() {
+    for (url, expected_name) in [
+        ("http://192.168.1.5:5002", "peer-192-168-1-5"),
+        ("http://192.168.1.6:5002", "peer-192-168-1-6"),
+        ("https://[2001:db8::1]:5002", "peer-2001-db8--1"),
+    ] {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/v1/federation/peers");
+            then.status(200)
+                .json_body_obj(&serde_json::json!({"count": 0, "peers": []}));
+        });
+        let create = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/federation/peers")
+                .json_body_obj(&serde_json::json!({
+                    "name": expected_name,
+                    "base_url": url,
+                    "auth_token": "",
+                    "enabled": true,
+                    "sync_interval_secs": 300,
+                    "compat_mode": "strict"
+                }));
+            then.status(201)
+                .json_body_obj(&peer_json("peer-id", expected_name, url, true));
+        });
+
+        let output = mnemosctl()
+            .args(["--base", &server.base_url(), "peer", "add", url])
+            .output()
+            .expect("mnemosctl runs");
+
+        assert!(
+            output.status.success(),
+            "url={url}, stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        create.assert();
+    }
 }
 
 #[test]

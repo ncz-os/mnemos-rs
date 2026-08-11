@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn mnemosctl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mnemosctl"))
+    Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
 }
 
 #[test]

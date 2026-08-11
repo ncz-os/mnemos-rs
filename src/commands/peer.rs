@@ -77,7 +77,7 @@ async fn add(
     }
     let resolved_name = match name {
         Some(name) if !name.trim().is_empty() => name,
-        _ => default_name_from_url(url),
+        _ => default_name_from_url(url)?,
     };
     let peer_token = peer_token.and_then(|token| (!token.trim().is_empty()).then_some(token));
 
@@ -142,7 +142,7 @@ async fn add(
 async fn list(client: &Client, endpoint: &str, server_token: Option<&str>) -> Result<()> {
     let peers = fetch_peers(client, endpoint, server_token).await?;
     if peers.peers.is_empty() {
-        println!("No peers configured. Add one with: mnemosctl peer add <URL> --name <NAME>");
+        println!("No peers configured. Add one with: mnemos-desktop peer add <URL> --name <NAME>");
         return Ok(());
     }
     println!("{:<20} {:<9} URL", "NAME", "STATUS");
@@ -201,14 +201,9 @@ async fn ensure_success(response: Response) -> Result<Response> {
     anyhow::bail!("HTTP {status}: {detail}")
 }
 
-fn default_name_from_url(url: &str) -> String {
-    let trimmed = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    let host: String = trimmed
-        .chars()
-        .take_while(|c| !matches!(*c, ':' | '/'))
-        .collect();
+fn default_name_from_url(url: &str) -> Result<String> {
+    let parsed = reqwest::Url::parse(url).context("invalid peer URL")?;
+    let host = parsed.host_str().context("peer URL must include a host")?;
     let mut name = host
         .to_ascii_lowercase()
         .chars()
@@ -216,16 +211,20 @@ fn default_name_from_url(url: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string();
+
+    let starts_with_letter = name.as_bytes().first().is_some_and(u8::is_ascii_lowercase);
+    if name.len() < 3 || !starts_with_letter {
+        name = if name.is_empty() {
+            "peer".to_string()
+        } else {
+            format!("peer-{name}")
+        };
+    }
     if name.len() > 64 {
         name.truncate(64);
         name = name.trim_end_matches('-').to_string();
     }
-    let starts_with_letter = name.as_bytes().first().is_some_and(u8::is_ascii_lowercase);
-    if name.len() < 3 || !starts_with_letter {
-        "peer".to_string()
-    } else {
-        name
-    }
+    Ok(name)
 }
 
 #[cfg(test)]
@@ -235,10 +234,17 @@ mod tests {
     #[test]
     fn default_name_matches_core_peer_name_contract() {
         assert_eq!(
-            default_name_from_url("https://Pythia.Local/v1"),
+            default_name_from_url("https://Pythia.Local/v1").unwrap(),
             "pythia-local"
         );
-        assert_eq!(default_name_from_url("http://192.168.1.5:5002"), "peer");
-        assert_eq!(default_name_from_url(""), "peer");
+        assert_eq!(
+            default_name_from_url("http://192.168.1.5:5002").unwrap(),
+            "peer-192-168-1-5"
+        );
+        assert_eq!(
+            default_name_from_url("https://[2001:db8::1]:5002").unwrap(),
+            "peer-2001-db8--1"
+        );
+        assert!(default_name_from_url("").is_err());
     }
 }

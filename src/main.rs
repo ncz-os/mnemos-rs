@@ -1,4 +1,4 @@
-//! mnemosctl — MNEMOS desktop CLI
+//! mnemos-desktop — MNEMOS desktop CLI
 //!
 //! Provides status, search, memory creation, and peer configuration helpers.
 //!
@@ -11,7 +11,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 mod commands;
 
 #[derive(Parser, Debug)]
-#[command(name = "mnemosctl", version, about, long_about = None)]
+#[command(name = "mnemos-desktop", version, about, long_about = None)]
 struct Cli {
     /// Base URL of the MNEMOS server (default: http://localhost:5002)
     #[arg(

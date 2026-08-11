@@ -5,7 +5,7 @@ use httpmock::prelude::*;
 use serde_json::Value;
 
 fn mnemosctl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mnemosctl"))
+    Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
 }
 
 #[test]

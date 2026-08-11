@@ -51,17 +51,24 @@ pub async fn status(base: &str, token: Option<&str>, raw: bool) -> Result<()> {
         .context("failed to build HTTP client")?;
     let base = base.trim_end_matches('/');
 
-    let health = match get_json::<HealthResponse>(&client, &format!("{base}/health"), None).await {
-        Ok(health) => health,
-        Err(err) => {
-            eprintln!("MNEMOS UNREACHABLE: {err}");
-            std::process::exit(2);
-        }
-    };
+    let (health, health_service_unavailable) =
+        match get_health(&client, &format!("{base}/health")).await {
+            Ok(health) => health,
+            Err(err) => {
+                eprintln!("MNEMOS UNREACHABLE: {err}");
+                std::process::exit(2);
+            }
+        };
 
-    let stats = get_json::<StatsResponse>(&client, &format!("{base}/stats"), token)
-        .await
-        .context("failed to fetch MNEMOS stats")?;
+    let health_degraded = health_service_unavailable || status_unhealthy(&health);
+    let stats = match get_json::<StatsResponse>(&client, &format!("{base}/stats"), token).await {
+        Ok(stats) => Some(stats),
+        Err(err) if health_degraded => {
+            eprintln!("MNEMOS statistics unavailable: {err}");
+            None
+        }
+        Err(err) => return Err(err).context("failed to fetch MNEMOS stats"),
+    };
 
     if raw {
         println!(
@@ -72,14 +79,29 @@ pub async fn status(base: &str, token: Option<&str>, raw: bool) -> Result<()> {
             }))?
         );
     } else {
-        print_summary(&health, &stats);
+        print_summary(&health, stats.as_ref(), health_degraded);
     }
 
-    if status_unhealthy(&health) {
+    if health_degraded {
         anyhow::bail!("MNEMOS health is degraded");
     }
 
     Ok(())
+}
+
+async fn get_health(client: &Client, url: &str) -> Result<(HealthResponse, bool)> {
+    let response = client.get(url).send().await.context("request failed")?;
+    let status = response.status();
+    if !status.is_success() && status != StatusCode::SERVICE_UNAVAILABLE {
+        anyhow::bail!("{}", http_status_error(status));
+    }
+
+    let service_unavailable = status == StatusCode::SERVICE_UNAVAILABLE;
+    let health = response
+        .json::<HealthResponse>()
+        .await
+        .context("invalid JSON response")?;
+    Ok((health, service_unavailable))
 }
 
 async fn get_json<T>(client: &Client, url: &str, token: Option<&str>) -> Result<T>
@@ -100,7 +122,7 @@ where
     response.json::<T>().await.context("invalid JSON response")
 }
 
-fn print_summary(health: &HealthResponse, stats: &StatsResponse) {
+fn print_summary(health: &HealthResponse, stats: Option<&StatsResponse>, health_degraded: bool) {
     let name = text_field(&health.extra, &["name", "node", "peer", "hostname"])
         .or_else(|| (!is_ok_status(&health.status)).then_some(health.status.as_str()))
         .unwrap_or("server");
@@ -109,7 +131,7 @@ fn print_summary(health: &HealthResponse, stats: &StatsResponse) {
     } else {
         "disconnected"
     };
-    let health_status = if status_unhealthy(health) {
+    let health_status = if health_degraded {
         "degraded"
     } else {
         &health.status
@@ -127,8 +149,25 @@ fn print_summary(health: &HealthResponse, stats: &StatsResponse) {
     if let Some(worker) = health.distillation_worker.as_deref() {
         println!("  Distillation worker: {worker}");
     }
-    println!("  Memories:  {}", memories_summary(stats));
-    println!("  Compressions: {}", compressions_summary(stats));
+    if let Some(worker) = text_field(&health.extra, &["deletion_request_worker"]) {
+        println!("  Deletion request worker: {worker}");
+    }
+    if let Some(worker) = text_field(&health.extra, &["hard_deletion_request_worker"]) {
+        println!("  Hard deletion request worker: {worker}");
+    }
+    if let Some(worker) = text_field(&health.extra, &["persephone_archival_worker"]) {
+        println!("  Persephone archival worker: {worker}");
+    }
+    match stats {
+        Some(stats) => {
+            println!("  Memories:  {}", memories_summary(stats));
+            println!("  Compressions: {}", compressions_summary(stats));
+        }
+        None => {
+            println!("  Memories:  unavailable");
+            println!("  Compressions: unavailable");
+        }
+    }
 
     println!("  Health:    {}", health_status.to_ascii_uppercase());
 }
@@ -147,24 +186,32 @@ fn compressions_summary(stats: &StatsResponse) -> String {
     )
 }
 
-fn nats_summary(health: &HealthResponse, stats: &StatsResponse) -> Option<String> {
+fn nats_summary(health: &HealthResponse, stats: Option<&StatsResponse>) -> Option<String> {
     let status = if health.nats_publishing_enabled {
         "enabled"
     } else {
         "disabled"
     };
 
-    match number_field(&stats.extra, &["nats_streams", "streams"]) {
+    match stats.and_then(|stats| number_field(&stats.extra, &["nats_streams", "streams"])) {
         Some(streams) => Some(format!("{status} ({streams} streams)")),
         None => Some(status.to_string()),
     }
 }
 
 fn required_worker_unhealthy(health: &HealthResponse) -> bool {
-    matches!(
+    let distillation_unhealthy = matches!(
         health.distillation_worker.as_deref(),
         Some("starting" | "error" | "unavailable")
-    )
+    );
+    let critical_worker_unhealthy = [
+        text_field(&health.extra, &["deletion_request_worker"]),
+        text_field(&health.extra, &["hard_deletion_request_worker"]),
+        text_field(&health.extra, &["persephone_archival_worker"]),
+    ]
+    .into_iter()
+    .any(|status| matches!(status, Some("starting" | "error")));
+    distillation_unhealthy || critical_worker_unhealthy
 }
 
 fn status_unhealthy(health: &HealthResponse) -> bool {
