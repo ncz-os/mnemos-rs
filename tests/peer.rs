@@ -1,6 +1,9 @@
 use std::process::Command;
 
 use httpmock::prelude::*;
+// PATCH is not re-exported by httpmock's prelude (which carries GET/POST/PUT/
+// DELETE), so it has to be imported explicitly or these mocks fail to compile.
+use httpmock::Method::PATCH;
 
 fn mnemosctl() -> Command {
     Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
