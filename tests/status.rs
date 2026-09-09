@@ -4,7 +4,14 @@ use httpmock::prelude::*;
 use serde_json::Value;
 
 fn mnemosctl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"));
+    command
+        .env_remove("MNEMOS_BASE")
+        .env_remove("MNEMOS_TOKEN")
+        .env_remove("MNEMOS_API_KEY")
+        .env_remove("MNEMOS_PEER_TOKEN")
+        .env_remove("MNEMOS_CREDENTIALS_FILE");
+    command
 }
 
 #[test]
@@ -41,13 +48,8 @@ fn happy_path_prints_friendly_summary() {
     });
 
     let output = mnemosctl()
-        .args([
-            "--base",
-            &server.base_url(),
-            "--token",
-            "test-token",
-            "status",
-        ])
+        .env("MNEMOS_TOKEN", "test-token")
+        .args(["--base", &server.base_url(), "status"])
         .output()
         .expect("mnemosctl runs");
 

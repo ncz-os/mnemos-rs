@@ -46,7 +46,9 @@ fn default_profile() -> String {
 
 pub async fn status(base: &str, token: Option<&str>, raw: bool) -> Result<()> {
     let client = Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client")?;
     let base = base.trim_end_matches('/');

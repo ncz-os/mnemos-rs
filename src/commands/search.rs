@@ -25,7 +25,9 @@ pub async fn search(
     raw: bool,
 ) -> Result<()> {
     let client = Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client")?;
     let base = base.trim_end_matches('/');
@@ -41,7 +43,9 @@ pub async fn search(
     {
         Ok(response) => response,
         Err(SearchError::Unauthorized) => {
-            eprintln!("Unauthorized: provide --token or set MNEMOS_API_KEY");
+            eprintln!(
+                "Unauthorized: set MNEMOS_TOKEN (or MNEMOS_API_KEY) or use --credentials-file"
+            );
             std::process::exit(3);
         }
         Err(SearchError::Http(message)) => {

@@ -30,9 +30,16 @@ struct CreatePeer<'a> {
     compat_mode: &'static str,
 }
 
-pub async fn peer(base: &str, server_token: Option<&str>, action: PeerAction) -> Result<()> {
+pub async fn peer(
+    base: &str,
+    server_token: Option<&str>,
+    configured_peer_token: Option<String>,
+    action: PeerAction,
+) -> Result<()> {
     let client = Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("failed to build HTTP client")?;
     let endpoint = format!("{}/v1/federation/peers", base.trim_end_matches('/'));
@@ -41,7 +48,7 @@ pub async fn peer(base: &str, server_token: Option<&str>, action: PeerAction) ->
         PeerAction::Add {
             url,
             name,
-            peer_token,
+            peer_token_arg: _,
             clear_token,
             preserve_token,
         } => {
@@ -51,7 +58,7 @@ pub async fn peer(base: &str, server_token: Option<&str>, action: PeerAction) ->
                 server_token,
                 &url,
                 name,
-                peer_token,
+                configured_peer_token,
                 clear_token,
                 preserve_token,
             )
@@ -87,7 +94,8 @@ async fn add(
         if url_changed && peer_token.is_none() && !clear_token && !preserve_token {
             anyhow::bail!(
                 "changing the URL for peer '{resolved_name}' (was {}, now {url}) requires \
-                 explicit token handling; pass --peer-token, --clear-token, or --preserve-token",
+                 explicit token handling; set MNEMOS_PEER_TOKEN, use --credentials-file, or pass \
+                 --clear-token or --preserve-token",
                 existing.base_url
             );
         }
@@ -193,7 +201,9 @@ async fn ensure_success(response: Response) -> Result<Response> {
         })
         .unwrap_or_default();
     if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-        anyhow::bail!("HTTP {status}: unauthorized; provide --token or set MNEMOS_API_KEY");
+        anyhow::bail!(
+            "HTTP {status}: unauthorized; set MNEMOS_TOKEN (or MNEMOS_API_KEY) or use --credentials-file"
+        );
     }
     if detail.is_empty() {
         anyhow::bail!("HTTP {status}");

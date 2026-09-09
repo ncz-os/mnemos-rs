@@ -1,12 +1,21 @@
+use std::io::Write;
 use std::process::Command;
 
 use httpmock::prelude::*;
 // PATCH is not re-exported by httpmock's prelude (which carries GET/POST/PUT/
 // DELETE), so it has to be imported explicitly or these mocks fail to compile.
 use httpmock::Method::PATCH;
+use tempfile::NamedTempFile;
 
 fn mnemosctl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mnemos-desktop"));
+    command
+        .env_remove("MNEMOS_BASE")
+        .env_remove("MNEMOS_TOKEN")
+        .env_remove("MNEMOS_API_KEY")
+        .env_remove("MNEMOS_PEER_TOKEN")
+        .env_remove("MNEMOS_CREDENTIALS_FILE");
+    command
 }
 
 fn peer_json(id: &str, name: &str, base_url: &str, enabled: bool) -> serde_json::Value {
@@ -51,18 +60,16 @@ fn add_registers_peer_with_core_api_and_distinct_tokens() {
     });
 
     let output = mnemosctl()
+        .env("MNEMOS_TOKEN", "root-secret")
+        .env("MNEMOS_PEER_TOKEN", "peer-secret")
         .args([
             "--base",
             &server.base_url(),
-            "--token",
-            "root-secret",
             "peer",
             "add",
             "https://peer.example",
             "--name",
             "pythia",
-            "--peer-token",
-            "peer-secret",
         ])
         .output()
         .expect("mnemosctl runs");
@@ -150,7 +157,14 @@ fn default_names_keep_ip_peers_distinct() {
         });
 
         let output = mnemosctl()
-            .args(["--base", &server.base_url(), "peer", "add", url])
+            .args([
+                "--base",
+                &server.base_url(),
+                "--allow-insecure-http",
+                "peer",
+                "add",
+                url,
+            ])
             .output()
             .expect("mnemosctl runs");
 
@@ -161,6 +175,62 @@ fn default_names_keep_ip_peers_distinct() {
         );
         create.assert();
     }
+}
+
+#[test]
+fn credentials_file_peer_token_beats_ambient_environment() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/v1/federation/peers");
+        then.status(200)
+            .json_body_obj(&serde_json::json!({"count": 0, "peers": []}));
+    });
+    let create = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/federation/peers")
+            .json_body_obj(&serde_json::json!({
+                "name": "pythia",
+                "base_url": "https://peer.example",
+                "auth_token": "file-peer-secret",
+                "enabled": true,
+                "sync_interval_secs": 300,
+                "compat_mode": "strict"
+            }));
+        then.status(201).json_body_obj(&peer_json(
+            "peer-id",
+            "pythia",
+            "https://peer.example",
+            true,
+        ));
+    });
+    let mut credentials = NamedTempFile::new().expect("credentials file");
+    credentials
+        .write_all(b"peer_token = \"file-peer-secret\"\n")
+        .expect("write credentials");
+    credentials.flush().expect("flush credentials");
+
+    let output = mnemosctl()
+        .env("MNEMOS_PEER_TOKEN", "ambient-peer-secret")
+        .args([
+            "--base",
+            &server.base_url(),
+            "--credentials-file",
+            credentials.path().to_str().expect("utf8 path"),
+            "peer",
+            "add",
+            "https://peer.example",
+            "--name",
+            "pythia",
+        ])
+        .output()
+        .expect("mnemosctl runs");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create.assert();
 }
 
 #[test]
@@ -194,6 +264,7 @@ fn readding_existing_peer_patches_server_row() {
     });
 
     let output = mnemosctl()
+        .env("MNEMOS_PEER_TOKEN", "new-peer-secret")
         .args([
             "--base",
             &server.base_url(),
@@ -202,8 +273,6 @@ fn readding_existing_peer_patches_server_row() {
             "https://new.example",
             "--name",
             "pythia",
-            "--peer-token",
-            "new-peer-secret",
         ])
         .output()
         .expect("mnemosctl runs");
