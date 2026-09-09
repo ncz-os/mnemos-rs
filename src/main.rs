@@ -5,10 +5,14 @@
 //! See `project_mnemos_rust_clients.md` in MNEMOS auto-memory for the
 //! full charter and Python/Rust scope decision.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 mod commands;
+mod secret;
+mod transport;
 
 #[derive(Parser, Debug)]
 #[command(name = "mnemos-desktop", version, about, long_about = None)]
@@ -22,9 +26,22 @@ struct Cli {
     )]
     base: String,
 
-    /// Bearer token for server auth (default: read from MNEMOS_API_KEY env).
-    #[arg(long, env = "MNEMOS_API_KEY", global = true, hide_env_values = true)]
-    token: Option<String>,
+    /// Deprecated and unsafe: credential values are rejected on the command line.
+    #[arg(long = "token", global = true, hide = true)]
+    token_arg: Option<String>,
+
+    /// TOML credentials file containing `token` and/or `peer_token` (mode 0600).
+    #[arg(
+        long,
+        env = "MNEMOS_CREDENTIALS_FILE",
+        global = true,
+        value_name = "PATH"
+    )]
+    credentials_file: Option<PathBuf>,
+
+    /// Explicitly allow bearer credentials over plaintext HTTP to non-loopback hosts.
+    #[arg(long, global = true)]
+    allow_insecure_http: bool,
 
     #[command(subcommand)]
     cmd: Cmd,
@@ -94,16 +111,14 @@ enum PeerAction {
         #[arg(long)]
         name: Option<String>,
 
-        /// Bearer token for the peer. Distinct flag name from the
-        /// global --token so the server bearer (sourced from
-        /// MNEMOS_API_KEY) does not silently leak into peer records.
-        #[arg(long = "peer-token", hide_env_values = true)]
-        peer_token: Option<String>,
+        /// Deprecated and unsafe: credential values are rejected on the command line.
+        #[arg(long = "peer-token", hide = true)]
+        peer_token_arg: Option<String>,
 
         /// Drop the previously-saved token. Required when re-adding a
-        /// peer to make it anonymous; without this flag, omitting
-        /// --peer-token preserves the existing token.
-        #[arg(long = "clear-token", conflicts_with = "peer_token")]
+        /// peer to make it anonymous; without this flag, omitting a token
+        /// source preserves the existing token.
+        #[arg(long = "clear-token", conflicts_with = "peer_token_arg")]
         clear_token: bool,
 
         /// Carry the existing bearer across a URL change. Required
@@ -113,7 +128,7 @@ enum PeerAction {
         /// retries do NOT need this flag.
         #[arg(
             long = "preserve-token",
-            conflicts_with = "peer_token",
+            conflicts_with = "peer_token_arg",
             conflicts_with = "clear_token"
         )]
         preserve_token: bool,
@@ -124,16 +139,31 @@ enum PeerAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    reject_credential_arguments();
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).map_err(|e| {
         e.exit();
     });
     let cli = cli.unwrap_or_else(|_| unreachable!("from_arg_matches exits on error"));
 
+    let credentials = secret::Credentials::load(cli.credentials_file.as_deref())?;
+
     match cli.cmd {
-        Cmd::Status { raw } => commands::status(&cli.base, cli.token.as_deref(), raw).await,
+        Cmd::Status { raw } => {
+            transport::require_secure_for_credentials(
+                &cli.base,
+                credentials.token.is_some(),
+                cli.allow_insecure_http,
+            )?;
+            commands::status(&cli.base, credentials.token.as_deref(), raw).await
+        }
         Cmd::Search { query, limit, raw } => {
-            commands::search(&cli.base, cli.token.as_deref(), &query, limit, raw).await
+            transport::require_secure_for_credentials(
+                &cli.base,
+                credentials.token.is_some(),
+                cli.allow_insecure_http,
+            )?;
+            commands::search(&cli.base, credentials.token.as_deref(), &query, limit, raw).await
         }
         Cmd::Create {
             content,
@@ -142,9 +172,14 @@ async fn main() -> Result<()> {
             permission_mode,
             raw,
         } => {
+            transport::require_secure_for_credentials(
+                &cli.base,
+                credentials.token.is_some(),
+                cli.allow_insecure_http,
+            )?;
             commands::create(
                 &cli.base,
-                cli.token.as_deref(),
+                credentials.token.as_deref(),
                 content.as_deref(),
                 &category,
                 subcategory.as_deref(),
@@ -153,6 +188,67 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Cmd::Peer { action } => commands::peer(&cli.base, cli.token.as_deref(), action).await,
+        Cmd::Peer { action } => {
+            match &action {
+                PeerAction::Add { url, .. } => {
+                    // Peer configuration can preserve a server-stored bearer even when no
+                    // credential is supplied locally. Protect both the management request
+                    // and the peer destination conservatively.
+                    transport::require_secure_for_credentials(
+                        &cli.base,
+                        true,
+                        cli.allow_insecure_http,
+                    )?;
+                    transport::require_secure_for_credentials(url, true, cli.allow_insecure_http)?;
+                }
+                PeerAction::List => transport::require_secure_for_credentials(
+                    &cli.base,
+                    credentials.token.is_some(),
+                    cli.allow_insecure_http,
+                )?,
+            }
+            let suppress_peer_token = matches!(
+                &action,
+                PeerAction::List
+                    | PeerAction::Add {
+                        clear_token: true,
+                        ..
+                    }
+                    | PeerAction::Add {
+                        preserve_token: true,
+                        ..
+                    }
+            );
+            let peer_token = (!suppress_peer_token)
+                .then_some(credentials.peer_token)
+                .flatten();
+            commands::peer(&cli.base, credentials.token.as_deref(), peer_token, action).await
+        }
+    }
+}
+
+fn reject_credential_arguments() {
+    for argument in std::env::args_os().skip(1) {
+        let argument = argument.to_string_lossy();
+        if argument == "--" {
+            break;
+        }
+        let message = if argument == "--token" || argument.starts_with("--token=") {
+            Some(
+                "bearer credentials are not accepted in argv; set MNEMOS_TOKEN (or \
+                 MNEMOS_API_KEY) or use --credentials-file PATH (mode 0600)",
+            )
+        } else if argument == "--peer-token" || argument.starts_with("--peer-token=") {
+            Some(
+                "peer bearer credentials are not accepted in argv; set MNEMOS_PEER_TOKEN or \
+                 use --credentials-file PATH (mode 0600)",
+            )
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            eprintln!("error: {message}");
+            std::process::exit(2);
+        }
     }
 }

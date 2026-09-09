@@ -37,6 +37,29 @@ project owns the `mnemosctl` package and executable names.
 
 Implemented commands are exposed in `mnemos-desktop --help`.
 
+## Credentials and transport
+
+Bearer credentials are accepted only from environment variables or a protected
+credentials file; credential values passed as `--token` or `--peer-token` are
+rejected. Set `MNEMOS_TOKEN` (the legacy `MNEMOS_API_KEY` is also supported)
+for server authentication and `MNEMOS_PEER_TOKEN` for peer authentication.
+
+Alternatively, pass `--credentials-file PATH` (or set
+`MNEMOS_CREDENTIALS_FILE`) with a TOML file whose Unix mode is exactly `0600`:
+
+```toml
+token = "server-bearer"
+peer_token = "peer-bearer"
+```
+
+File values take precedence over ambient environment variables on a per-field
+basis; a missing file field falls back to its corresponding environment source.
+
+Credentialed connections require HTTPS unless the target is loopback. The
+explicit `--allow-insecure-http` option overrides this protection for trusted
+development networks where HTTPS is unavailable. The CLI ignores ambient
+HTTP proxy settings so requests cannot be silently routed outside this policy.
+
 ## License
 
 Apache-2.0.
